@@ -26,16 +26,17 @@
     <h2>Online Sınaq İmtahanı</h2>
     <div id="timer">Yüklənir...</div>
     <div id="quiz">Suallar hazırlanır...</div>
-    <button id="finishBtn" onclick="finish()">İmtahanı Bitir</button>
+    <button id="finishBtn" onclick="finish()" style="display:none;">İmtahanı Bitir</button>
     <div id="result"></div>
 </div>
 
 <script>
-let TIME = 30 * 60;
+const TIME_LIMIT = 30 * 60; // 30 dəqiqə
+let TIME = TIME_LIMIT;
 let interval;
 let startScore = 0;
 let currentQuestions = [];
-const QUESTIONS_URL = "questions.json";   // ← bunu saxla, çünki fayl adı tam kiçikdir
+const QUESTIONS_URL = "questions.json"; // Fayl eyni qovluqda olmalıdır
 
 function shuffle(array) {
     for (let i = array.length - 1; i > 0; i--) {
@@ -45,48 +46,44 @@ function shuffle(array) {
     return array;
 }
 
-async function start() {
-    const val = prompt("İmtahana giriş balın neçədir? (0–50)");
-    startScore = parseInt(val) || 0;
-    
-    try {
-        const res = await fetch(QUESTIONS_URL);
-        let allQuestions = await res.json();
-        
-        // Düzgün cavabı olan sualları seç və qarıştır
-        allQuestions = allQuestions.filter(q => q.correct);
-        currentQuestions = shuffle([...allQuestions]).slice(0, 25);
-        
-        const quizDiv = document.getElementById("quiz");
-        quizDiv.innerHTML = "";
+async function loadQuestions() {
+    const quizDiv = document.getElementById("quiz");
+    quizDiv.innerHTML = "Suallar yüklənir...";
 
+    try {
+        console.log("Fetch başlayır: " + QUESTIONS_URL);
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 saniyə timeout
+
+        const res = await fetch(QUESTIONS_URL, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+            throw new Error(`Server xətası: ${res.status} - ${res.statusText}`);
+        }
+
+        const allQuestions = await res.json();
+        console.log("JSON yükləndi, sual sayı:", allQuestions.length);
+
+        const validQuestions = allQuestions.filter(q => q.q && q.options && q.correct);
+        if (validQuestions.length === 0) throw new Error("Heç bir düzgün sual tapılmadı");
+
+        currentQuestions = shuffle([...validQuestions]).slice(0, 25); // 25 random sual
+
+        quizDiv.innerHTML = "";
         currentQuestions.forEach((q, i) => {
             let optionsHtml = "";
-            
-            // Database-də həm Object hem Array variantları ola bilər, ona görə yoxlayırıq:
-            if (Array.isArray(q.options)) {
-                // Əgər Massivdirsə (0, 1, 2... indeksi ilə)
-                q.options.forEach((opt, idx) => {
-                    const label = String.fromCharCode(65 + idx); // 0->A, 1->B...
-                    optionsHtml += `
-                        <label class="option">
-                            <input type="radio" name="q${i}" value="${label}"> ${label}) ${opt}
-                        </label>`;
-                });
-            } else {
-                // Əgər Obyektdirsə (A: "...", B: "...")
-                Object.keys(q.options).forEach(key => {
-                    optionsHtml += `
-                        <label class="option">
-                            <input type="radio" name="q${i}" value="${key}"> ${key}) ${q.options[key]}
-                        </label>`;
-                });
-            }
+            Object.keys(q.options).forEach(key => {
+                optionsHtml += `
+                    <label class="option">
+                        <input type="radio" name="q${i}" value="${key}"> ${key}) ${q.options[key]}
+                    </label>`;
+            });
 
-            // "Boşluq" variantı mütləq sonda 1 dəfə əlavə edilir
             optionsHtml += `
                 <label class="option" style="background: #f1f2f6; border-style: dashed;">
-                    <input type="radio" name="q${i}" value="BOS"> <b>Boşluq (Bal silinmir)</b>
+                    <input type="radio" name="q${i}" value="BOS"> <b>Boş burax (bal silinmir)</b>
                 </label>`;
 
             quizDiv.innerHTML += `
@@ -97,18 +94,39 @@ async function start() {
                 </div>`;
         });
 
-        interval = setInterval(updateTimer, 1000);
+        document.getElementById("finishBtn").style.display = "block";
+        startTimer();
     } catch (err) {
-        document.getElementById("quiz").innerHTML = "Xəta: JSON faylı düzgün formatda deyil.";
+        console.error("Xəta:", err.message);
+        quizDiv.innerHTML = `
+            <div style="color:red; text-align:center; padding:20px;">
+                <h3>Xəta baş verdi!</h3>
+                <p>${err.message}</p>
+                <p>Console-da (F12) detallara baxın. Çox güman ki, questions.json faylı yüklənmədi və ya cache problemidir.</p>
+                <button onclick="location.reload()">Yenidən cəhd et</button>
+            </div>`;
     }
+}
+
+function start() {
+    const val = prompt("İmtahana giriş balın neçədir? (0–50, boş buraxa bilərsən)", "0");
+    startScore = parseInt(val) || 0;
+    if (startScore < 0 || startScore > 50) startScore = 0;
+
+    loadQuestions(); // fetch-i buradan çağırırıq
+}
+
+function startTimer() {
+    document.getElementById("timer").innerText = `Qalan vaxt: 30:00`;
+    interval = setInterval(updateTimer, 1000);
 }
 
 function updateTimer() {
     if (TIME <= 0) { finish(); return; }
     TIME--;
-    let m = Math.floor(TIME / 60);
-    let s = TIME % 60;
-    document.getElementById("timer").innerText = `Qalan vaxt: ${m}:${s < 10 ? '0'+s : s}`;
+    const m = Math.floor(TIME / 60);
+    const s = TIME % 60;
+    document.getElementById("timer").innerText = `Qalan vaxt: ${m}:${s < 10 ? '0' + s : s}`;
 }
 
 function finish() {
@@ -118,7 +136,7 @@ function finish() {
 
     let correctCount = 0;
     let wrongCount = 0;
-    
+
     currentQuestions.forEach((q, i) => {
         const selected = document.querySelector(`input[name="q${i}"]:checked`);
         const block = document.getElementById(`block${i}`);
@@ -135,7 +153,7 @@ function finish() {
             } else {
                 wrongCount++;
                 block.classList.add("wrong-ans");
-                feedback.innerHTML = `<b>❌ Səhv! (-1 bal).</b> Düzgün: ${q.correct}`;
+                feedback.innerHTML = `<b>❌ Səhv! (-1 bal)</b> Düzgün: ${q.correct}`;
             }
         } else {
             block.classList.add("skipped-ans");
@@ -143,25 +161,21 @@ function finish() {
         }
     });
 
-    let examScore = (correctCount * 2) - (wrongCount * 1);
-    let total = startScore + examScore;
-    
+    const examScore = (correctCount * 2) - (wrongCount * 1);
+    const total = startScore + examScore;
+
     document.getElementById("result").innerHTML = `
         <div style="background:#2c3e50; color:white; padding:20px; border-radius:10px; text-align:center;">
             <h2>Nəticə</h2>
             <p>Doğru: ${correctCount} | Səhv: ${wrongCount}</p>
-            <p>Sınaq Balı: ${examScore}</p>
+            <p>Sınaq Balı: ${examScore} (doğru ×2 - səhv ×1)</p>
             <hr>
             <h3>Yekun Bal: ${total}</h3>
         </div>`;
 }
 
-start();
+// Səhifə yüklənəndə dərhal başla
+window.onload = start;
 </script>
 </body>
 </html>
-
-
-
-
-
